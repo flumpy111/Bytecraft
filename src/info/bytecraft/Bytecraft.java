@@ -1,40 +1,35 @@
 package info.bytecraft;
 
-import info.bytecraft.api.*;
-import info.bytecraft.zones.Lot;
-import info.bytecraft.zones.Zone;
-import info.bytecraft.zones.Zone.Permission;
-import info.bytecraft.zones.ZoneWorld;
-import info.bytecraft.api.BytecraftPlayer.Flag;
-import info.bytecraft.api.event.CallEventListener;
-import info.bytecraft.commands.*;
-import info.bytecraft.database.*;
-import info.bytecraft.database.db.DBContextFactory;
-import info.bytecraft.listener.*;
-import info.tregmine.quadtree.IntersectionException;
-
 import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.*;
 
-import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
-import org.bukkit.Location;
-import org.bukkit.World;
+import org.bukkit.*;
 import org.bukkit.World.Environment;
-import org.bukkit.WorldCreator;
-import org.bukkit.WorldType;
 import org.bukkit.block.Block;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
-import org.bukkit.plugin.PluginDescriptionFile;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.maxmind.geoip.LookupService;
+
+import info.bytecraft.api.*;
+import info.bytecraft.api.BytecraftPlayer.Flag;
+import info.bytecraft.api.event.CallEventListener;
+import info.bytecraft.commands.*;
+import info.bytecraft.database.*;
+import info.bytecraft.database.db.DBContextFactory;
+import info.bytecraft.listener.*;
+import info.bytecraft.tools.ToolRegistry;
+import info.bytecraft.zones.Lot;
+import info.bytecraft.zones.Zone;
+import info.bytecraft.zones.ZoneWorld;
+
+import info.tregmine.quadtree.IntersectionException;
 
 public class Bytecraft extends JavaPlugin
 {
@@ -45,6 +40,7 @@ public class Bytecraft extends JavaPlugin
     private List<String> quitMessages;
     //private List<String> swordNames;
     //private Map<String, List<String>> armorNames;
+    
     private Map<Location, String> blessedBlocks;
     
     private LookupService lookup = null;
@@ -102,9 +98,11 @@ public class Bytecraft extends JavaPlugin
             this.deathMessages = messages.loadDeathMessages();
             this.quitMessages = messages.loadQuitMessages();
         }catch(DAOException e){
-            
+            throw new RuntimeException(e);
         }
-
+        
+        ToolRegistry.registerRecipes(getServer());
+        
         registerEvents();
 
         getCommand("back").setExecutor(new BackCommand(this));
@@ -113,10 +111,12 @@ public class Bytecraft extends JavaPlugin
         getCommand("brush").setExecutor(new BrushCommand(this));
         getCommand("clear").setExecutor(new ClearCommand(this));
         getCommand("cmob").setExecutor(new CreateMobCommand(this));
+        getCommand("cname").setExecutor(new ChangeNameCommand(this));
         getCommand("creative").setExecutor(new GameModeCommand(this, "creative"));
         getCommand("channel").setExecutor(new ChannelCommand(this));
         getCommand("chestlog").setExecutor(new ChestLogCommand(this));
         getCommand("fill").setExecutor(new FillCommand(this, "fill"));
+        getCommand("flag").setExecutor(new FlagCommand(this));
         getCommand("force").setExecutor(new ForceCommand(this));
         getCommand("gamemode").setExecutor(new GameModeCommand(this, "gamemode"));
         getCommand("give").setExecutor(new GiveCommand(this));
@@ -133,6 +133,7 @@ public class Bytecraft extends JavaPlugin
         getCommand("me").setExecutor(new ActionCommand(this));
         getCommand("message").setExecutor(new MessageCommand(this, "message"));
         getCommand("mute").setExecutor(new MuteCommand(this));
+        getCommand("newspawn").setExecutor(new NewSpawnCommand(this));
         getCommand("nuke").setExecutor(new NukeCommand(this));
         getCommand("pos").setExecutor(new PositionCommand(this));
         getCommand("reply").setExecutor(new MessageCommand(this, "reply"));
@@ -164,13 +165,6 @@ public class Bytecraft extends JavaPlugin
         albion.environment(Environment.NORMAL);
         albion.type(WorldType.AMPLIFIED);
         this.rolePlayWorld = albion.createWorld();
-        
-        PluginDescriptionFile pdf = getDescription();
-        
-        String version = pdf.getVersion();
-        
-        Bukkit.broadcastMessage(ChatColor.GREEN + "Successfuly loaded Bytecraft " 
-        + ChatColor.GOLD + "v" + version + ChatColor.GREEN + "!");
     }
     
     public void onDisable()
@@ -178,6 +172,7 @@ public class Bytecraft extends JavaPlugin
         getServer().getScheduler().cancelTasks(this);
         
         for(BytecraftPlayer player: getOnlinePlayers()){
+            player.saveInventory(player.getCurrentInventory());
             this.removePlayer(player);
         }
     }
@@ -203,6 +198,7 @@ public class Bytecraft extends JavaPlugin
         pm.registerEvents(new BytecraftBlockListener(this), this);
         pm.registerEvents(new CallEventListener(this), this);
         pm.registerEvents(new ChatListener(this), this);
+        pm.registerEvents(new ElevatorListener(this), this);
         pm.registerEvents(new FillListener(this), this);
         pm.registerEvents(new InventoryListener(this), this);
         pm.registerEvents(new ItemFrameListener(this), this);
@@ -211,12 +207,18 @@ public class Bytecraft extends JavaPlugin
         pm.registerEvents(new SaleSignListener(this), this);
         pm.registerEvents(new SelectListener(this), this);
         pm.registerEvents(new SignColorListener(), this);
+        pm.registerEvents(new ToolListener(), this);
+        pm.registerEvents(new VeinListener(this), this);
         pm.registerEvents(new WorldPortalListener(this), this);
         pm.registerEvents(new ZoneListener(this), this);
         
         //rare drop
         //pm.registerEvents(new RareDropListener(this), this);
         pm.registerEvents(new DamageListener(this), this);
+        
+        //rpg
+        //pm.registerEvents(new PlayerListener(this), this);
+        
     }
     
     // ========================================================
@@ -265,17 +267,19 @@ public class Bytecraft extends JavaPlugin
     
     public BytecraftPlayer getPlayerOffline(String name)
     {
-        if(this.players.containsKey(name)){
+        if(players.containsKey(name)){
             return players.get(name);
         }
+        
         try(IContext ctx = createContext()){
             IPlayerDAO dao = ctx.getPlayerDAO();
-            return dao.getPlayer(name);
-        }catch(DAOException e){
-            throw new RuntimeException(e);
+            return dao.getPlayerOffline(name);
+        }catch(DAOException ex){
+            throw new RuntimeException(ex);
         }
     }
-
+    
+    //this method should be okay
     public BytecraftPlayer addPlayer(Player srcPlayer,  InetAddress addr)
             throws PlayerBannedException
     {
@@ -285,12 +289,15 @@ public class Bytecraft extends JavaPlugin
         
         try (IContext ctx = createContext()){
             IPlayerDAO dao = ctx.getPlayerDAO();
+            //as long as this one is changed
             BytecraftPlayer player = dao.getPlayer(srcPlayer);
             
             if(player == null){
+                //and this one
                 player = dao.createPlayer(srcPlayer);
             }
             
+            //and this one
             if(dao.isBanned(player)){
                 throw new PlayerBannedException(ChatColor.RED + "You are not allowed on this server");
             }
@@ -300,6 +307,7 @@ public class Bytecraft extends JavaPlugin
             player.setFlag(Flag.MUTE, false);
             
             IReportDAO reportDao = ctx.getReportDAO();
+            //and this one
             List<PlayerReport> reports = reportDao.getReports(player);
             for(PlayerReport report: reports){
                 Date validUntil = report.getValidUntil();
@@ -335,6 +343,7 @@ public class Bytecraft extends JavaPlugin
                 player.setPlayerListName(name);
             }
             
+            player.setTemporaryChatName(name);
             player.setIp(addr.getHostAddress());
             player.setHost(addr.getCanonicalHostName());
             
@@ -346,32 +355,12 @@ public class Bytecraft extends JavaPlugin
                 }
             }
             
+            
+            
             ILogDAO logs = ctx.getLogDAO();
             logs.insertLogin(player, "login");
             
             players.put(player.getName(), player);
-            
-            Location loc = player.getLocation();
-            
-            if(loc != null){
-               Zone zone = this.getWorld(loc.getWorld()).findZone(loc);
-               if(zone != null){
-                   player.sendMessage(ChatColor.RED + "[" + zone.getName() + "] "
-                           + zone.getEnterMessage());
-
-                   if (zone.hasFlag(Zone.Flag.PVP)) {
-                       player.sendMessage(ChatColor.RED
-                               + "[" + zone.getName() + "] "
-                               + "Warning! This is a PVP zone! Other players can damage or kill you here.");
-                   }
-                   Permission perm  = zone.getUser(player);
-                   if (perm != null) {
-                       String permNotification = perm.getPermNotification();
-                       player.sendMessage(ChatColor.RED + "[" + zone.getName()
-                               + "] " + permNotification);
-                   }
-               }
-            }
             
             return player;
         }catch(DAOException e){
@@ -411,18 +400,6 @@ public class Bytecraft extends JavaPlugin
         return players;
     }
     
-    public BytecraftPlayer getBytecraftPlayerOffline(String name)
-    {
-        if(players.containsKey(name)){
-            return players.get(name);
-        }
-        try(IContext ctx = createContext()){
-            return ctx.getPlayerDAO().getPlayer(name);
-        }catch(DAOException e){
-            throw new RuntimeException(e);
-        }
-    }
-
     // ========================================================
     // ======================= Zones ==========================
     // ========================================================
@@ -445,6 +422,7 @@ public class Bytecraft extends JavaPlugin
                         getLogger().warning("Failed to load zone " + zone.getName()
                                 + " with id " + zone.getId() + ".");
                     }
+                    
                 }
 
                 List<Lot> lots = dao.getLots(world.getName());

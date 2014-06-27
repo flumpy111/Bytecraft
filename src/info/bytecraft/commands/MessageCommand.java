@@ -6,10 +6,10 @@ import org.bukkit.ChatColor;
 
 import info.bytecraft.Bytecraft;
 import info.bytecraft.api.BytecraftPlayer;
+import info.bytecraft.api.BytecraftPlayer.Flag;
 import info.bytecraft.api.Notification;
 import info.bytecraft.api.Rank;
-import info.bytecraft.api.BytecraftPlayer.Flag;
-import info.bytecraft.commands.AbstractCommand;
+import info.bytecraft.api.util.StringUtil;
 import info.bytecraft.database.DAOException;
 import info.bytecraft.database.IContext;
 
@@ -21,21 +21,11 @@ public class MessageCommand extends AbstractCommand
         super(instance, command);
     }
     
-    private String argsToMessage(String[] args, int start)
-    {
-        StringBuilder message = new StringBuilder();
-        for (int i = start; i < args.length; i++) {
-            message.append(args[i] + " ");
-        }
-        
-        return message.toString().trim();
-    }
-
     public boolean handlePlayer(BytecraftPlayer player, String[] args)
     {
         if(command.equalsIgnoreCase("reply")){
-            if(args.length >= 1){
-                this.replyToLastMessage(player, this.argsToMessage(args, 0));
+            if(args.length >= 1){ 
+                this.replyToLastMessage(player, StringUtil.join(args, ' ', 1, args.length));
                 return true;
             }
         }else if(command.equalsIgnoreCase("message")){
@@ -46,9 +36,9 @@ public class MessageCommand extends AbstractCommand
                 
                 }
                 BytecraftPlayer target = cantidates.get(0);
-                sendMessage(player, target, argsToMessage(args, 1));
+                sendMessage(player, target, StringUtil.join(args, ' ', 1, args.length));
                 plugin.getLogger().info("[Message] " + player.getName() + " -> " + 
-                target.getName() + " : " + argsToMessage(args, 1));
+                target.getName() + " : " + StringUtil.join(args, ' ', 1, args.length));
             }
         }
         return true;
@@ -57,17 +47,17 @@ public class MessageCommand extends AbstractCommand
     private void sendMessage(BytecraftPlayer player, BytecraftPlayer target, String message)
     {
         target.sendNotification(Notification.MESSAGE, ChatColor.GREEN
-                + "<msg> " + player.getDisplayName() + ": "
+                + "<msg> " + player.getTemporaryChatName() + ": "
                 + ChatColor.GREEN + message);
         if(target.hasFlag(Flag.INVISIBLE)){
             if(player.getRank() == Rank.ELDER || player.getRank() == Rank.PRINCESS){
                 player.sendMessage(ChatColor.GREEN + "<To> "
-                        + target.getDisplayName() + ": " + ChatColor.GREEN
+                        + target.getTemporaryChatName() + ": " + ChatColor.GREEN
                         + message);
             }
         }else{
             player.sendMessage(ChatColor.GREEN + "<To> "
-                    + target.getDisplayName() + ": " + ChatColor.GREEN
+                    + target.getTemporaryChatName() + ": " + ChatColor.GREEN
                     + message);
         }
         target.setLastMessager(player);
@@ -87,7 +77,7 @@ public class MessageCommand extends AbstractCommand
             player.sendMessage(ChatColor.RED + "No one has messaged you yet.");
             return;
         }
-        sendMessage(player, player.getLastMessager(), message);
+        sendMessage(player, target, message);
     }
 
 }

@@ -1,27 +1,28 @@
 package info.bytecraft.api;
 
+import java.text.NumberFormat;
+import java.util.*;
+
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.Location;
+import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.Player;
+
+import com.google.common.collect.Maps;
+
 import info.bytecraft.Bytecraft;
+import info.bytecraft.api.event.PlayerChangeRankEvent;
+import info.bytecraft.database.DAOException;
+import info.bytecraft.database.IContext;
+import info.bytecraft.database.IInventoryDAO;
+import info.bytecraft.database.IPlayerDAO;
 import info.bytecraft.zones.Lot;
 import info.bytecraft.zones.Zone;
 import info.bytecraft.zones.Zone.Permission;
 import info.bytecraft.zones.ZoneWorld;
-import info.bytecraft.database.DAOException;
-import info.bytecraft.database.IContext;
-import info.bytecraft.database.IPlayerDAO;
-
-import java.text.NumberFormat;
-import java.util.Date;
-import java.util.EnumSet;
-import java.util.HashMap;
-import java.util.Set;
-
-import org.bukkit.ChatColor;
-import org.bukkit.Location;
-import org.bukkit.block.Block;
-import org.bukkit.entity.Entity;
-import org.bukkit.entity.Horse;
-import org.bukkit.entity.Player;
-import org.bukkit.entity.Vehicle;
 
 public class BytecraftPlayer extends PlayerDelegate
 {
@@ -35,21 +36,25 @@ public class BytecraftPlayer extends PlayerDelegate
         INVISIBLE,
         TPBLOCK,
         CAN_FLY,
-        CHEST_LOG;
+        CHEST_LOG,
+        IMMORTAL;
     }
     
     public static enum ChatState{
         CHAT,
         SELL,
+        COMMAND,
         SALESIGN_BUY,
         SALESIGN_WITHDRAW,
-        SALESIGN_SETUP;
+        SALESIGN_SETUP,
+        NPC_SPEECH;
     }
 
     private Bytecraft plugin;
     private String name;
     private int id = 0;
-    private Rank rank;
+    private Rank rank = Rank.NEWCOMER;
+    private String currentInventory;
 
     private String chatChannel = "GLOBAL";
     private ChatState chatState = ChatState.CHAT;
@@ -78,15 +83,20 @@ public class BytecraftPlayer extends PlayerDelegate
     private HashMap<Badge, Integer> badges;
     
     private Date loginTime;
-
+    
+    private String temporaryChatName;
+    
+    
+    private UUID storeUuid;
+    
     public BytecraftPlayer(Player player, Bytecraft plugin)
     {
         super(player);
         this.setName(player.getName());
-        loginTime = new Date();
-        flags = EnumSet.noneOf(Flag.class);
+        this.loginTime = new Date();
+        this.flags = EnumSet.noneOf(Flag.class);
         this.plugin = plugin;
-        badges = new HashMap<>();
+        this.badges = Maps.newHashMap();
     }
 
 
@@ -94,15 +104,27 @@ public class BytecraftPlayer extends PlayerDelegate
     {
         super(null);
         this.setName(name);
-        loginTime = new Date();
-        flags = EnumSet.noneOf(Flag.class);
+        this.flags = EnumSet.noneOf(Flag.class);
         this.plugin = plugin;
+        this.badges = Maps.newHashMap();
+    }
+
+
+    public BytecraftPlayer(UUID uuid, Bytecraft plugin)
+    {
+        super(Bukkit.getOfflinePlayer(uuid).getPlayer());
+        this.flags = EnumSet.noneOf(Flag.class);
+        this.plugin = plugin;
+        this.badges = Maps.newHashMap();
     }
 
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
     
+    public String getTemporaryChatName() {  return temporaryChatName; }
+    public void setTemporaryChatName(String temporaryChatName) { this.temporaryChatName = temporaryChatName; }
+
     public ChatColor getNameColor()
     {
         try(IContext ctx = plugin.createContext()){
@@ -126,9 +148,35 @@ public class BytecraftPlayer extends PlayerDelegate
 
     public void setId(int id) { this.id = id; }
     
+    public UUID getStoreUuid()
+    {
+        return storeUuid;
+    }
+
+
+    public void setStoreUuid(UUID storeUuid)
+    {
+        this.storeUuid = storeUuid;
+    }
+
+
     public Rank getRank() { return this.rank; }
     
-    public void setRank(Rank rank) { this.rank = rank; }
+    public void setRank(Rank rank) 
+    { 
+        //dont fire event if first time setting rank
+        if(this.rank == null){
+            setTemporaryChatName(rank.getColor() + name);
+            this.rank = rank;
+            return;
+        }
+        
+        PlayerChangeRankEvent event = new PlayerChangeRankEvent(this, getRank(), rank);
+        
+        plugin.getServer().getPluginManager().callEvent(event);
+        
+        this.rank = event.getNewRank();
+    }
     
     public long getBalance()
     {
@@ -439,37 +487,140 @@ public class BytecraftPlayer extends PlayerDelegate
         return false; // If they don't fit into any of that. Return false
     }
     
-    //org.bukkit.entity.Player override
-    @Override
-    public boolean teleport(Entity player)
-    {
-        this.teleportWithHorse(player.getLocation());
-        return true;
-    }
-    
-    @Override
-    public boolean teleport(Location location)
-    {
-        this.teleportWithHorse(location);
-        return true;
-    }
-    
-    public boolean teleport(BytecraftPlayer player)
-    {
-        return this.teleport(player.getDelegate());
-    }
-
-
     public void teleportWithHorse(Location loc)
     {
+        World cWorld = loc.getWorld();
+        String[] worldNamePortions = cWorld.getName().split("_");
+        
         Entity v = getVehicle();
-        if (v != null) {
+        if (v != null && v.getType().isAlive()) {
             v.setPassenger(null);
             teleport(loc);
             v.teleport(loc);
             v.setPassenger(getDelegate());
         }else{
-            getDelegate().teleport(loc);
+            teleport(loc);
+        }
+        
+        if (worldNamePortions[0].equalsIgnoreCase("world")) {
+            this.loadInventory("survival", true);
+        } else {
+            this.loadInventory(worldNamePortions[0], true);
         }
     }
+    
+    @Override
+    public String toString()
+    {
+        return String.format("BytecraftPlayer{name=%s, id=%d, rank=%s}", getName(), getId(), getRank().name().toLowerCase());
+    }
+    
+    @Override
+    public int hashCode()
+    {
+        return getId();
+    }
+    
+    @Override
+    public boolean equals(Object other)
+    {
+        if(other instanceof BytecraftPlayer){
+            return false;
+        }
+        
+        return ((BytecraftPlayer)other).getId() == getId();
+    }
+    
+    public String getCurrentInventory() { return currentInventory; }
+    public void setCurrentInventory(String inv) { this.currentInventory = inv; }
+    
+    public void loadInventory(String name, boolean save)
+    {
+        try (IContext ctx = plugin.createContext()) {
+            IInventoryDAO dao = ctx.getInventoryDAO();
+
+            if (save) {
+                this.saveInventory(currentInventory);
+            }
+
+            boolean firstTime = false;
+
+            int id3;
+            id3 = dao.fetchInventory(this, name, "main");
+            while (id3 == -1) {
+                dao.createInventory(this, name, "main");
+                id3 = dao.fetchInventory(this, name, "main");
+                firstTime = true;
+            }
+
+            int id4;
+            id4 = dao.fetchInventory(this, name, "armour");
+            while (id4 == -1) {
+                dao.createInventory(this, name, "armour");
+                id4 = dao.fetchInventory(this, name, "armour");
+                firstTime = true;
+            }
+            
+            if (firstTime) {
+                this.saveInventory(name);
+            }
+
+            this.getInventory().clear();
+            updateInventory();
+            this.getInventory().setHelmet(null);
+            this.getInventory().setChestplate(null);
+            this.getInventory().setLeggings(null);
+            this.getInventory().setBoots(null);
+
+            dao.loadInventory(this, id3, "main");
+
+            dao.loadInventory(this, id4, "armour");
+            
+            updateInventory();
+            
+            this.currentInventory = name;
+            IPlayerDAO playerDAO = ctx.getPlayerDAO();
+            playerDAO.updatePlayerInventory(this);
+            
+        } catch (DAOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /*
+     * Save the inventory specified, if null - saves current inventory.
+     * @param name - Name of the new inventory
+     */
+    public void saveInventory(String name)
+    {
+        String inventory = name;
+        if (name == null) {
+            inventory = this.currentInventory;
+        }
+
+        try (IContext ctx = plugin.createContext()) {
+            IInventoryDAO dao = ctx.getInventoryDAO();
+
+            int id;
+            id = dao.fetchInventory(this, inventory, "main");
+            while (id == -1) {
+                dao.createInventory(this, inventory, "main");
+                id = dao.fetchInventory(this, inventory, "main");
+            }
+
+            dao.saveInventory(this, id, "main");
+
+            int id2;
+            id2 = dao.fetchInventory(this, inventory, "armour");
+            while (id2 == -1) {
+                dao.createInventory(this, inventory, "armour");
+                id2 = dao.fetchInventory(this, inventory, "armour");
+            }
+
+            dao.saveInventory(this, id2, "armour");
+        } catch (DAOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+   
 }

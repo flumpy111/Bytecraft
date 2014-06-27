@@ -13,6 +13,7 @@ import info.bytecraft.api.Rank;
 
 public interface IPlayerDAO
 {
+    public BytecraftPlayer getPlayerOffline(String name) throws DAOException;
     public BytecraftPlayer getPlayer(Player player) throws DAOException;
     public BytecraftPlayer getPlayer(String name) throws DAOException;
     public BytecraftPlayer getPlayer(String name, Player wrap) throws DAOException;
@@ -32,6 +33,8 @@ public interface IPlayerDAO
     public void updatePlayTime(BytecraftPlayer player) throws DAOException;
     public boolean isBanned(BytecraftPlayer player) throws DAOException;
     public void ban(BytecraftPlayer player) throws DAOException;
+    
+    public void updatePlayerInventory(BytecraftPlayer player) throws DAOException;
     
     public HashMap<Badge, Integer> getBadges(BytecraftPlayer player) throws DAOException;
     public void addBadge(BytecraftPlayer player, Badge badge, int level) throws DAOException;

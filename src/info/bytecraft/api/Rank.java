@@ -1,8 +1,8 @@
 package info.bytecraft.api;
 
-import org.bukkit.ChatColor;
-
 import static org.bukkit.ChatColor.*;
+
+import org.bukkit.ChatColor;
 
 public enum Rank
 {
@@ -39,6 +39,11 @@ public enum Rank
             }
         }
         return Rank.NEWCOMER;
+    }
+    
+    public boolean canSpawnTools()
+    {
+        return (this == ADMIN || this == ARCHITECT || isElder());
     }
     
     public boolean canBuild()
@@ -272,7 +277,7 @@ public enum Rank
 
     public boolean canChangeName()
     {
-        return isElder();
+        return (this == ADMIN || isElder());
     }
 
     public boolean canKeepItems()

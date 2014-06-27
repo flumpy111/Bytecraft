@@ -1,10 +1,5 @@
 package info.bytecraft.database.db;
 
-import info.bytecraft.api.BytecraftPlayer;
-import info.bytecraft.api.InventoryAccess;
-import info.bytecraft.database.DAOException;
-import info.bytecraft.database.IInventoryDAO;
-
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -20,6 +15,11 @@ import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+
+import info.bytecraft.api.BytecraftPlayer;
+import info.bytecraft.api.InventoryAccess;
+import info.bytecraft.database.DAOException;
+import info.bytecraft.database.IInventoryDAO;
 
 public class DBInventoryDAO implements IInventoryDAO
 {
@@ -39,15 +39,15 @@ public class DBInventoryDAO implements IInventoryDAO
     }
 
     @Override
-    public int getInventoryId(String playerName, InventoryType type)
+    public int getInventoryId(int playerId, InventoryType type)
     throws DAOException
     {
         String sql = "SELECT * FROM inventory " +
-                     "WHERE inventory_type = ? AND player_name = ?";
+                     "WHERE inventory_type = ? AND player_id = ?";
 
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, type.toString());
-            stmt.setString(2, playerName);
+            stmt.setInt(2, playerId);
             stmt.execute();
 
             try (ResultSet rs = stmt.getResultSet()) {
@@ -431,6 +431,7 @@ public class DBInventoryDAO implements IInventoryDAO
                        }
                    }
                }
+               player.updateInventory();
            } catch (SQLException e) {
                throw new DAOException(sql, e);
            } catch (InvalidConfigurationException e) {
@@ -445,12 +446,12 @@ public class DBInventoryDAO implements IInventoryDAO
         String sql = "SELECT * FROM playerinventory " +
                      "WHERE playerinventory_name = ? " +
                      "AND playerinventory_type = ? " +
-                     "AND player_name = ?";
+                     "AND player_id = ?";
 
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, inventoryName);
             stmt.setString(2, type);
-            stmt.setString(3, player.getName());
+            stmt.setInt(3, player.getId());
             stmt.execute();
 
             try (ResultSet rs = stmt.getResultSet()) {
@@ -471,11 +472,11 @@ public class DBInventoryDAO implements IInventoryDAO
                                 String type)
     throws DAOException
     {
-        String sql = "INSERT INTO playerinventory (player_name, " +
+        String sql = "INSERT INTO playerinventory (player_id, " +
             "playerinventory_name, playerinventory_type) VALUES (?,?,?)";
 
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, player.getName());
+            stmt.setInt(1, player.getId());
             stmt.setString(2, inventoryName);
             stmt.setString(3, type);
             stmt.execute();
